@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db, firebaseConfig } from '../firebase.ts';
 import { Course, GradeBreakdown, Student } from '../types.ts';
 
@@ -22,6 +22,7 @@ export interface FirebaseSystemState {
   gradePublished?: boolean;
   currentYear?: string;
   currentSemester?: string;
+  churchLogo?: string;
 }
 
 /**
@@ -108,16 +109,21 @@ export async function checkFirebaseConnection(): Promise<FirebaseConnectionRepor
 
 export async function loadInitialFromFirestore(): Promise<FirebaseSystemState | null> {
   try {
-    const metaDoc = await getDoc(doc(db, 'system_state', 'meta'));
-    const studentsDoc = await getDoc(doc(db, 'system_state', 'students'));
-    const coursesDoc = await getDoc(doc(db, 'system_state', 'courses'));
-    const gradesDoc = await getDoc(doc(db, 'system_state', 'grades'));
-    const passwordsDoc = await getDoc(doc(db, 'system_state', 'passwords'));
-    const photosDoc = await getDoc(doc(db, 'system_state', 'photos'));
+    const [metaDoc, studentsDoc, coursesDoc, gradesDoc, passwordsDoc, photosDoc, brandDoc] = await Promise.all([
+      getDoc(doc(db, 'system_state', 'meta')),
+      getDoc(doc(db, 'system_state', 'students')),
+      getDoc(doc(db, 'system_state', 'courses')),
+      getDoc(doc(db, 'system_state', 'grades')),
+      getDoc(doc(db, 'system_state', 'passwords')),
+      getDoc(doc(db, 'system_state', 'photos')),
+      getDoc(doc(db, '_system_settings', 'branding'))
+    ]);
 
+    let hasAnyData = false;
     const state: FirebaseSystemState = {};
 
     if (metaDoc.exists()) {
+      hasAnyData = true;
       const data = metaDoc.data();
       if (typeof data.systemLocked === 'boolean') state.systemLocked = data.systemLocked;
       if (typeof data.gradePublished === 'boolean') state.gradePublished = data.gradePublished;
@@ -128,28 +134,43 @@ export async function loadInitialFromFirestore(): Promise<FirebaseSystemState | 
     }
 
     if (studentsDoc.exists()) {
+      hasAnyData = true;
       const data = studentsDoc.data();
       if (Array.isArray(data.list) && data.list.length > 0) state.students = data.list;
     }
 
     if (coursesDoc.exists()) {
+      hasAnyData = true;
       const data = coursesDoc.data();
       if (Array.isArray(data.list) && data.list.length > 0) state.courses = data.list;
     }
 
     if (gradesDoc.exists()) {
+      hasAnyData = true;
       const data = gradesDoc.data();
       if (data.data) state.grades = data.data;
     }
 
     if (passwordsDoc.exists()) {
+      hasAnyData = true;
       const data = passwordsDoc.data();
       if (data.data) state.userPasswords = data.data;
     }
 
     if (photosDoc.exists()) {
+      hasAnyData = true;
       const data = photosDoc.data();
       if (data.data) state.photos = data.data;
+    }
+
+    if (brandDoc.exists()) {
+      hasAnyData = true;
+      const data = brandDoc.data();
+      if (data.churchLogo) state.churchLogo = data.churchLogo;
+    }
+
+    if (!hasAnyData) {
+      return null;
     }
 
     return state;
@@ -214,39 +235,6 @@ export async function syncPhotosToFirestore(photos: Record<string, string>) {
   }
 }
 
-/**
- * Pushes entire system state to Firebase Firestore at once
- */
-export async function pushAllStateToFirestore(payload: {
-  meta: {
-    systemLocked: boolean;
-    gradePublished: boolean;
-    currentYear: string;
-    currentSemester: string;
-    availableYears: string[];
-    teachers: string[];
-  };
-  students: Student[];
-  courses: Course[];
-  grades: Record<string, GradeBreakdown>;
-  passwords: Record<string, string>;
-  photos: Record<string, string>;
-}): Promise<{ success: boolean; error?: string }> {
-  try {
-    await Promise.all([
-      setDoc(doc(db, 'system_state', 'meta'), payload.meta, { merge: true }),
-      setDoc(doc(db, 'system_state', 'students'), { list: payload.students }, { merge: true }),
-      setDoc(doc(db, 'system_state', 'courses'), { list: payload.courses }, { merge: true }),
-      setDoc(doc(db, 'system_state', 'grades'), { data: payload.grades }, { merge: true }),
-      setDoc(doc(db, 'system_state', 'passwords'), { data: payload.passwords }, { merge: true }),
-      setDoc(doc(db, 'system_state', 'photos'), { data: payload.photos }, { merge: true })
-    ]);
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err?.message || String(err) };
-  }
-}
-
 export async function syncChurchLogoToFirestore(logo: string) {
   try {
     await setDoc(doc(db, '_system_settings', 'branding'), { churchLogo: logo, updatedAt: new Date().toISOString() }, { merge: true });
@@ -265,5 +253,165 @@ export async function loadChurchLogoFromFirestore(): Promise<string | null> {
     console.warn('Error loading church logo from Firestore:', e);
   }
   return null;
+}
+
+/**
+ * Pushes entire system state to Firebase Firestore at once
+ */
+export async function pushAllStateToFirestore(payload: {
+  meta: {
+    systemLocked: boolean;
+    gradePublished: boolean;
+    currentYear: string;
+    currentSemester: string;
+    availableYears: string[];
+    teachers: string[];
+  };
+  students: Student[];
+  courses: Course[];
+  grades: Record<string, GradeBreakdown>;
+  passwords: Record<string, string>;
+  photos: Record<string, string>;
+  churchLogo?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const promises: Promise<any>[] = [
+      setDoc(doc(db, 'system_state', 'meta'), payload.meta, { merge: true }),
+      setDoc(doc(db, 'system_state', 'students'), { list: payload.students }, { merge: true }),
+      setDoc(doc(db, 'system_state', 'courses'), { list: payload.courses }, { merge: true }),
+      setDoc(doc(db, 'system_state', 'grades'), { data: payload.grades }, { merge: true }),
+      setDoc(doc(db, 'system_state', 'passwords'), { data: payload.passwords }, { merge: true }),
+      setDoc(doc(db, 'system_state', 'photos'), { data: payload.photos }, { merge: true })
+    ];
+
+    if (payload.churchLogo) {
+      promises.push(
+        setDoc(doc(db, '_system_settings', 'branding'), { churchLogo: payload.churchLogo, updatedAt: new Date().toISOString() }, { merge: true })
+      );
+    }
+
+    await Promise.all(promises);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Subscribes to real-time updates from Firestore so that all changes made by teachers or admin
+ * are immediately reflected live across all browsers and devices without needing manual reload.
+ */
+export function subscribeToSystemState(callbacks: {
+  onMetaChange?: (meta: {
+    systemLocked?: boolean;
+    gradePublished?: boolean;
+    currentYear?: string;
+    currentSemester?: string;
+    availableYears?: string[];
+    teachers?: string[];
+  }) => void;
+  onStudentsChange?: (students: Student[]) => void;
+  onCoursesChange?: (courses: Course[]) => void;
+  onGradesChange?: (grades: Record<string, GradeBreakdown>) => void;
+  onPasswordsChange?: (passwords: Record<string, string>) => void;
+  onPhotosChange?: (photos: Record<string, string>) => void;
+  onLogoChange?: (logo: string) => void;
+}): () => void {
+  const unsubscribes: Unsubscribe[] = [];
+
+  try {
+    // 1. Meta
+    const unsubMeta = onSnapshot(doc(db, 'system_state', 'meta'), (snap) => {
+      if (snap.exists() && callbacks.onMetaChange) {
+        const data = snap.data();
+        callbacks.onMetaChange({
+          systemLocked: data.systemLocked,
+          gradePublished: data.gradePublished,
+          currentYear: data.currentYear,
+          currentSemester: data.currentSemester,
+          availableYears: data.availableYears,
+          teachers: data.teachers
+        });
+      }
+    }, (err) => console.warn('Meta snapshot warning:', err));
+    unsubscribes.push(unsubMeta);
+
+    // 2. Students
+    const unsubStudents = onSnapshot(doc(db, 'system_state', 'students'), (snap) => {
+      if (snap.exists() && callbacks.onStudentsChange) {
+        const data = snap.data();
+        if (Array.isArray(data.list) && data.list.length > 0) {
+          callbacks.onStudentsChange(data.list);
+        }
+      }
+    }, (err) => console.warn('Students snapshot warning:', err));
+    unsubscribes.push(unsubStudents);
+
+    // 3. Courses
+    const unsubCourses = onSnapshot(doc(db, 'system_state', 'courses'), (snap) => {
+      if (snap.exists() && callbacks.onCoursesChange) {
+        const data = snap.data();
+        if (Array.isArray(data.list) && data.list.length > 0) {
+          callbacks.onCoursesChange(data.list);
+        }
+      }
+    }, (err) => console.warn('Courses snapshot warning:', err));
+    unsubscribes.push(unsubCourses);
+
+    // 4. Grades
+    const unsubGrades = onSnapshot(doc(db, 'system_state', 'grades'), (snap) => {
+      if (snap.exists() && callbacks.onGradesChange) {
+        const data = snap.data();
+        if (data.data) {
+          callbacks.onGradesChange(data.data);
+        }
+      }
+    }, (err) => console.warn('Grades snapshot warning:', err));
+    unsubscribes.push(unsubGrades);
+
+    // 5. Passwords
+    const unsubPasswords = onSnapshot(doc(db, 'system_state', 'passwords'), (snap) => {
+      if (snap.exists() && callbacks.onPasswordsChange) {
+        const data = snap.data();
+        if (data.data) {
+          callbacks.onPasswordsChange(data.data);
+        }
+      }
+    }, (err) => console.warn('Passwords snapshot warning:', err));
+    unsubscribes.push(unsubPasswords);
+
+    // 6. Photos
+    const unsubPhotos = onSnapshot(doc(db, 'system_state', 'photos'), (snap) => {
+      if (snap.exists() && callbacks.onPhotosChange) {
+        const data = snap.data();
+        if (data.data) {
+          callbacks.onPhotosChange(data.data);
+        }
+      }
+    }, (err) => console.warn('Photos snapshot warning:', err));
+    unsubscribes.push(unsubPhotos);
+
+    // 7. Church Logo Branding
+    const unsubBranding = onSnapshot(doc(db, '_system_settings', 'branding'), (snap) => {
+      if (snap.exists() && callbacks.onLogoChange) {
+        const data = snap.data();
+        if (data.churchLogo) {
+          callbacks.onLogoChange(data.churchLogo);
+        }
+      }
+    }, (err) => console.warn('Branding snapshot warning:', err));
+    unsubscribes.push(unsubBranding);
+
+  } catch (err) {
+    console.warn('Error setting up snapshot listeners:', err);
+  }
+
+  return () => {
+    unsubscribes.forEach((unsub) => {
+      try {
+        unsub();
+      } catch (_) {}
+    });
+  };
 }
 

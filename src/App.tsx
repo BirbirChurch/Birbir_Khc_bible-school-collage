@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header.tsx';
 import { NotificationToast } from './components/NotificationToast.tsx';
 import { LoginView } from './components/LoginView.tsx';
@@ -28,6 +28,7 @@ import {
   checkFirebaseConnection,
   pushAllStateToFirestore,
   loadInitialFromFirestore,
+  subscribeToSystemState,
   syncMetaToFirestore,
   syncStudentsToFirestore,
   syncCoursesToFirestore,
@@ -156,25 +157,23 @@ export default function App() {
   const [isTestingFirebase, setIsTestingFirebase] = useState<boolean>(false);
   const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState<boolean>(false);
 
-  // Initialize and Sync from Firebase Firestore
+  // Synchronization guard refs to avoid overwriting cloud on mount and prevent echo loops
+  const isInitialSyncDoneRef = useRef(false);
+  const isRemoteUpdateRef = useRef(false);
+
+  // Initialize and Live Real-time Sync from Firebase Firestore
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
     async function initFirestore() {
       setIsTestingFirebase(true);
       try {
         const report = await checkFirebaseConnection();
         setFirebaseReport(report);
         if (report.status === 'connected') {
-          // Check remote branding logo
-          try {
-            const remoteLogo = await loadChurchLogoFromFirestore();
-            if (remoteLogo) {
-              setChurchLogo(remoteLogo);
-              saveChurchLogo(remoteLogo);
-            }
-          } catch (_) {}
-
           const remoteState = await loadInitialFromFirestore();
           if (remoteState) {
+            isRemoteUpdateRef.current = true;
             if (remoteState.students) setStudents(remoteState.students);
             if (remoteState.teachers) setTeachers(remoteState.teachers);
             if (remoteState.courses) setCourses(remoteState.courses);
@@ -186,21 +185,81 @@ export default function App() {
             if (typeof remoteState.gradePublished === 'boolean') setGradePublished(remoteState.gradePublished);
             if (remoteState.currentYear) setCurrentYear(remoteState.currentYear);
             if (remoteState.currentSemester) setCurrentSemester(remoteState.currentSemester);
+            if (remoteState.churchLogo) {
+              setChurchLogo(remoteState.churchLogo);
+              saveChurchLogo(remoteState.churchLogo);
+            }
+            setTimeout(() => {
+              isRemoteUpdateRef.current = false;
+            }, 300);
           } else {
-            // First time seeding to Firestore
-            syncMetaToFirestore({
-              systemLocked,
-              gradePublished,
-              currentYear,
-              currentSemester,
-              availableYears,
-              teachers
+            // Firestore project is newly connected and empty:
+            // Push local data to initialize cloud database so teachers and students can see it!
+            await pushAllStateToFirestore({
+              meta: {
+                systemLocked,
+                gradePublished,
+                currentYear,
+                currentSemester,
+                availableYears,
+                teachers
+              },
+              students,
+              courses,
+              grades,
+              passwords: userPasswords,
+              photos,
+              churchLogo
             });
-            syncStudentsToFirestore(students);
-            syncCoursesToFirestore(courses);
-            syncGradesToFirestore(grades);
-            syncPasswordsToFirestore(userPasswords);
+            showNotification('መረጃዎች በስኬት ወደ አዲሱ የFirebase ዳታቤዝ ተላልፈዋል!', 'success');
           }
+
+          isInitialSyncDoneRef.current = true;
+
+          // Subscribe to live changes from any teacher/student/admin anywhere
+          unsubscribe = subscribeToSystemState({
+            onMetaChange: (m) => {
+              isRemoteUpdateRef.current = true;
+              if (typeof m.systemLocked === 'boolean') setSystemLocked(m.systemLocked);
+              if (typeof m.gradePublished === 'boolean') setGradePublished(m.gradePublished);
+              if (m.currentYear) setCurrentYear(m.currentYear);
+              if (m.currentSemester) setCurrentSemester(m.currentSemester);
+              if (m.availableYears) setAvailableYears(m.availableYears);
+              if (m.teachers) setTeachers(m.teachers);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onStudentsChange: (newStudents) => {
+              isRemoteUpdateRef.current = true;
+              setStudents(newStudents);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onCoursesChange: (newCourses) => {
+              isRemoteUpdateRef.current = true;
+              setCourses(newCourses);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onGradesChange: (newGrades) => {
+              isRemoteUpdateRef.current = true;
+              setGrades(newGrades);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onPasswordsChange: (newPasswords) => {
+              isRemoteUpdateRef.current = true;
+              setUserPasswords(newPasswords);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onPhotosChange: (newPhotos) => {
+              isRemoteUpdateRef.current = true;
+              setPhotos(newPhotos);
+              setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+            },
+            onLogoChange: (newLogo) => {
+              if (newLogo) {
+                setChurchLogo(newLogo);
+                saveChurchLogo(newLogo);
+              }
+            }
+          });
         }
       } catch (err) {
         console.warn('Firebase sync note:', err);
@@ -209,6 +268,10 @@ export default function App() {
       }
     }
     initFirestore();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const handleTestFirebaseConnection = async () => {
@@ -243,11 +306,12 @@ export default function App() {
       courses,
       grades,
       passwords: userPasswords,
-      photos
+      photos,
+      churchLogo
     });
 
     if (result.success) {
-      showNotification('ሁሉም መረጃዎች በስኬት ወደ Firebase ተጭነዋል!', 'success');
+      showNotification('ሁሉም መረጃዎችና የቤተክርስቲያኑ አርማ በስኬት ወደ Firebase ተጭነዋል!', 'success');
     } else {
       showNotification(`ወደ Firebase መጫን አልተቻለም፦ ${result.error}`, 'error');
     }
@@ -258,6 +322,7 @@ export default function App() {
     try {
       const remoteState = await loadInitialFromFirestore();
       if (remoteState) {
+        isRemoteUpdateRef.current = true;
         if (remoteState.students) setStudents(remoteState.students);
         if (remoteState.teachers) setTeachers(remoteState.teachers);
         if (remoteState.courses) setCourses(remoteState.courses);
@@ -269,6 +334,13 @@ export default function App() {
         if (typeof remoteState.gradePublished === 'boolean') setGradePublished(remoteState.gradePublished);
         if (remoteState.currentYear) setCurrentYear(remoteState.currentYear);
         if (remoteState.currentSemester) setCurrentSemester(remoteState.currentSemester);
+        if (remoteState.churchLogo) {
+          setChurchLogo(remoteState.churchLogo);
+          saveChurchLogo(remoteState.churchLogo);
+        }
+        setTimeout(() => {
+          isRemoteUpdateRef.current = false;
+        }, 300);
         showNotification('የቅርብ ጊዜ መረጃዎች ከFirebase ተወስደዋል!', 'success');
       } else {
         showNotification('በFirebase ውስጥ የተቀመጠ መረጃ አልተገኘም', 'warning');
@@ -285,58 +357,16 @@ export default function App() {
     await syncChurchLogoToFirestore(newLogo);
   };
 
-  // Save changes to localStorage and Firestore
+  // Save changes to localStorage and Firestore with guard against wiping remote database
   useEffect(() => {
     localStorage.setItem('bk_students', JSON.stringify(students));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
     syncStudentsToFirestore(students);
   }, [students]);
 
   useEffect(() => {
     localStorage.setItem('bk_teachers', JSON.stringify(teachers));
-  }, [teachers]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_courses', JSON.stringify(courses));
-    syncCoursesToFirestore(courses);
-  }, [courses]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_grades', JSON.stringify(grades));
-    syncGradesToFirestore(grades);
-  }, [grades]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_photos', JSON.stringify(photos));
-    syncPhotosToFirestore(photos);
-  }, [photos]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_user_passwords', JSON.stringify(userPasswords));
-    syncPasswordsToFirestore(userPasswords);
-  }, [userPasswords]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_academic_years', JSON.stringify(availableYears));
-  }, [availableYears]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_systemLocked', String(systemLocked));
-  }, [systemLocked]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_gradePublished', String(gradePublished));
-  }, [gradePublished]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_currentYear', currentYear);
-  }, [currentYear]);
-
-  useEffect(() => {
-    localStorage.setItem('bk_currentSemester', currentSemester);
-  }, [currentSemester]);
-
-  // Sync meta on meta state changes
-  useEffect(() => {
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
     syncMetaToFirestore({
       systemLocked,
       gradePublished,
@@ -345,7 +375,96 @@ export default function App() {
       availableYears,
       teachers
     });
-  }, [systemLocked, gradePublished, currentYear, currentSemester, availableYears, teachers]);
+  }, [teachers]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_courses', JSON.stringify(courses));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncCoursesToFirestore(courses);
+  }, [courses]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_grades', JSON.stringify(grades));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncGradesToFirestore(grades);
+  }, [grades]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_photos', JSON.stringify(photos));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncPhotosToFirestore(photos);
+  }, [photos]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_user_passwords', JSON.stringify(userPasswords));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncPasswordsToFirestore(userPasswords);
+  }, [userPasswords]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_academic_years', JSON.stringify(availableYears));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncMetaToFirestore({
+      systemLocked,
+      gradePublished,
+      currentYear,
+      currentSemester,
+      availableYears,
+      teachers
+    });
+  }, [availableYears]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_systemLocked', String(systemLocked));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncMetaToFirestore({
+      systemLocked,
+      gradePublished,
+      currentYear,
+      currentSemester,
+      availableYears,
+      teachers
+    });
+  }, [systemLocked]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_gradePublished', String(gradePublished));
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncMetaToFirestore({
+      systemLocked,
+      gradePublished,
+      currentYear,
+      currentSemester,
+      availableYears,
+      teachers
+    });
+  }, [gradePublished]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_currentYear', currentYear);
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncMetaToFirestore({
+      systemLocked,
+      gradePublished,
+      currentYear,
+      currentSemester,
+      availableYears,
+      teachers
+    });
+  }, [currentYear]);
+
+  useEffect(() => {
+    localStorage.setItem('bk_currentSemester', currentSemester);
+    if (!isInitialSyncDoneRef.current || isRemoteUpdateRef.current) return;
+    syncMetaToFirestore({
+      systemLocked,
+      gradePublished,
+      currentYear,
+      currentSemester,
+      availableYears,
+      teachers
+    });
+  }, [currentSemester]);
 
   const showNotification = (
     text: string,

@@ -164,6 +164,26 @@ service cloud.firestore {
             </div>
           </div>
 
+          {/* Real-time Multi-Device Sync Card */}
+          {isConnected && (
+            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200 rounded-2xl p-4 space-y-2.5">
+              <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span>የቀጥታ ማመሳሰል (Live Real-time Sync) በርቷል</span>
+              </div>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                አሁን በሲስተሙ ላይ የሚደረጉ ማናቸውም ለውጦች (የተማሪዎች ምዝገባ፣ የውጤት አሞላል፣ የቀን መቁጠሪያ ወይም አርማ) በየትኛውም ቦታ ላሉ መምህራን እና ተማሪዎች በቀጥታ በእውነተኛ ጊዜ (Real-time) ይደርሳቸዋል።
+              </p>
+              <div className="p-2.5 bg-white/80 rounded-xl border border-emerald-100 text-[11px] text-slate-600 space-y-1">
+                <p className="font-semibold text-emerald-800">ጠቃሚ ማስታወሻ ለሁሉም ተጠቃሚዎች እንዲደርስ፦</p>
+                <p>በዚህ ኮምፒውተር ላይ የተመዘገቡትን ነባር ተማሪዎችና መረጃዎች ወደ አዲሱ ፕሮጀክት ለማስተላለፍ ከስር ያለውን <strong>"ሁሉንም መረጃ ወደ Firebase ጫን (Push)"</strong> የሚለውን አንድ ጊዜ ይጫኑ።</p>
+              </div>
+            </div>
+          )}
+
           {/* Step-by-Step Instructions if not connected */}
           {!isConnected && (
             <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 space-y-3">
