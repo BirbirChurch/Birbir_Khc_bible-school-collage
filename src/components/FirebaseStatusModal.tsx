@@ -172,14 +172,17 @@ service cloud.firestore {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </span>
-                <span>የቀጥታ ማመሳሰል (Live Real-time Sync) በርቷል</span>
+                <span>ቀጥታ ራሱን የቻለ ማመሳሰል በርቷል (Fully Automated Live Sync)</span>
               </div>
               <p className="text-xs text-slate-700 leading-relaxed">
-                አሁን በሲስተሙ ላይ የሚደረጉ ማናቸውም ለውጦች (የተማሪዎች ምዝገባ፣ የውጤት አሞላል፣ የቀን መቁጠሪያ ወይም አርማ) በየትኛውም ቦታ ላሉ መምህራን እና ተማሪዎች በቀጥታ በእውነተኛ ጊዜ (Real-time) ይደርሳቸዋል።
+                ሲስተሙ አሁን በቀጥታ ከFirebase ጋር ተገናኝቷል! ማናቸውም የተማሪዎች ምዝገባ፣ የውጤት አሞላል፣ የመምህራን መረጃ ወይም የቤተክርስቲያኑ አርማ ያለ ምንም አዝራር መጫን በቀጥታ በእውነተኛ ጊዜ (Real-time) በየትኛውም ቦታ ላሉ መምህራንና ተማሪዎች ወዲያውኑ ይደርሳቸዋል።
               </p>
               <div className="p-2.5 bg-white/80 rounded-xl border border-emerald-100 text-[11px] text-slate-600 space-y-1">
-                <p className="font-semibold text-emerald-800">ጠቃሚ ማስታወሻ ለሁሉም ተጠቃሚዎች እንዲደርስ፦</p>
-                <p>በዚህ ኮምፒውተር ላይ የተመዘገቡትን ነባር ተማሪዎችና መረጃዎች ወደ አዲሱ ፕሮጀክት ለማስተላለፍ ከስር ያለውን <strong>"ሁሉንም መረጃ ወደ Firebase ጫን (Push)"</strong> የሚለውን አንድ ጊዜ ይጫኑ።</p>
+                <p className="font-semibold text-emerald-800 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>ቀጥታ ግንኙነት ተረጋግጧል (Auto-Connected)፦</span>
+                </p>
+                <p>ምንም አይነት አዝራር መጫን አያስፈልግዎትም፤ መረጃዎች በሙሉ በራሳቸው በቀጥታ ይገናኛሉ። ከስር ያሉት "Push" እና "Pull" አዝራሮች ድንገት ለሚፈለግ በእጅ የመጠባበቂያ ቅጂ (Manual Backup) ብቻ የተቀመጡ አማራጮች ናቸው።</p>
               </div>
             </div>
           )}
